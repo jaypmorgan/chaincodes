@@ -128,7 +128,7 @@ def dataframe_to_skycoords(
     cdelt1 = [1] * len(feature_df)
     cdelt2 = [1] * len(feature_df)
     return dfp.tmap(
-        lambda r: rotate_skycoord_to_map(chaincode_to_skycoord(r[0], r[1]), smap),
+        lambda r: _rotate_skycoord_to_map(chaincode_to_skycoord(r[0], r[1]), smap),
         zip(
             dfp.tmap(lambda r: to_chaincode(*r), zip(x, y, c, cdelt1, cdelt2)),
             smaps,
@@ -136,19 +136,19 @@ def dataframe_to_skycoords(
     )
 
 
-def rotate_skycoord_to_map(
+def _rotate_skycoord_to_map(
     skycoord: Union[SkyCoord, List[SkyCoord]], smap: sunpy.map.Map
 ) -> SkyCoord:
     if isinstance(skycoord, (tuple, list)):
         if len(skycoord) == 0:
             return []
         return [
-            rotate_skycoord_to_map(dfp.first(skycoord), smap)
-        ] + rotate_skycoord_to_map(dfp.rest(skycoord), smap)
-    return rotate_skycoord_to_time(skycoord, timestamp=smap.date)
+            _rotate_skycoord_to_map(dfp.first(skycoord), smap)
+        ] + _rotate_skycoord_to_map(dfp.rest(skycoord), smap)
+    return _rotate_skycoord_to_time(skycoord, timestamp=smap.date)
 
 
-def rotate_skycoord_to_time(
+def _rotate_skycoord_to_time(
     skycoord: SkyCoord, timestamp: astropy.time.Time
 ) -> SkyCoord:
     warnings.resetwarnings()
@@ -159,14 +159,7 @@ def rotate_skycoord_to_time(
     return sk
 
 
-def project_chaincode_to_world(cc: Chaincode, smap: sunpy.map.GenericMap):
-    wcs = smap.wcs
-    x, y = cc.coordinates
-    coords = [(x[i], y[i]) for i in range(x.shape[0])]
-    return wcs.wcs_pix2world(coords, 1)
-
-
-def skycoord_to_pixel(skycoord, smap: sunpy.map.Map) -> tuple[np.ndarray, np.ndarray]:
+def _skycoord_to_pixel(skycoord, smap: sunpy.map.Map) -> tuple[np.ndarray, np.ndarray]:
     y, x = skycoord.to_pixel(smap.wcs)
     y = np.array(y)
     x = np.array(x)
@@ -175,7 +168,7 @@ def skycoord_to_pixel(skycoord, smap: sunpy.map.Map) -> tuple[np.ndarray, np.nda
     return x, y
 
 
-def complete_outline(x, y) -> tuple[np.ndarray, np.ndarray]:
+def _complete_outline(x, y) -> tuple[np.ndarray, np.ndarray]:
     def interpolate(x1, y1, x2, y2):
         # iterative interpolation between two integer coordinates:
         # produces every integer between these two points...could be
@@ -209,15 +202,15 @@ def complete_outline(x, y) -> tuple[np.ndarray, np.ndarray]:
     return out_x, out_y
 
 
-def infill_outline(outline: np.ndarray) -> np.ndarray:
+def _infill_outline(outline: np.ndarray) -> np.ndarray:
     return scipy.ndimage.binary_fill_holes(outline).astype(int)
 
 
-def diff(a, which="horizontal") -> np.ndarray:
+def _diff(a, which="horizontal") -> np.ndarray:
     if which == "both":
-        return ((diff(a, which="horizontal") + diff(a, which="vertical")) > 0.0).astype(
-            np.float64
-        )
+        return (
+            (_diff(a, which="horizontal") + _diff(a, which="vertical")) > 0.0
+        ).astype(np.float64)
 
     out = np.zeros_like(a)
     for row_idx in range(1, a.shape[0]):
@@ -243,22 +236,22 @@ def chaincode_to_mask(
     x, y = coord.coordinates
     mask = np.zeros_like(smap.data)
     mask[y.astype(int), x.astype(int)] = 1.0
-    mask = infill_outline(mask)
+    mask = _infill_outline(mask)
     return mask
 
 
 def skycoord_to_mask(
     skycoord: astropy.coordinates.SkyCoord, smap: sunpy.map.GenericMap
 ) -> np.ndarray:
-    x, y = skycoord_to_pixel(skycoord, smap)
+    x, y = _skycoord_to_pixel(skycoord, smap)
     output = np.zeros(smap.data.shape)
     if x.shape[0] == 0 or y.shape[0] == 0:
         return output
-    x, y = complete_outline(x, y)
+    x, y = _complete_outline(x, y)
     x[x >= output.shape[0]] = output.shape[0] - 1
     y[y >= output.shape[1]] = output.shape[1] - 1
     output[x, y] = 1.0
-    output = infill_outline(output)
+    output = _infill_outline(output)
     return output
 
 
@@ -282,7 +275,7 @@ def dataframe_to_mask(
     return pipeline(feature_df)
 
 
-def build_chain(outline: np.ndarray) -> dict[str, Any]:
+def _build_chain(outline: np.ndarray) -> dict[str, Any]:
     # generate a freeman 8 component chain code
     def get_neighbours(x, y):
         connected_neighbours: list[tuple[int, int]] = []
@@ -333,20 +326,20 @@ def build_chain(outline: np.ndarray) -> dict[str, Any]:
     }
 
 
-def pixel_to_arcsec(
+def _pixel_to_arcsec(
     x: Union[int, float], y: Union[int, float], smap: sunpy.map.GenericMap
 ) -> tuple[float, float]:
     s = smap.pixel_to_world(x * u.pixel, y * u.pixel)
     return s.Tx.value, s.Ty.value
 
 
-def mask_to_chaincode(mask: np.ndarray, smap: sunpy.map.Map) -> pd.DataFrame:
+def mask_to_dataframe(mask: np.ndarray, smap: sunpy.map.Map) -> pd.DataFrame:
     chaincodes: list[dict[str, Any]] = []
     labelled_array, n_features = scipy.ndimage.label(mask)
     for feature_idx in range(1, n_features + 1):
         _tmp = labelled_array == feature_idx
-        outline = diff((_tmp == 1).astype(np.int8), "both")
-        code = build_chain(outline)
+        outline = _diff((_tmp == 1).astype(np.int8), "both")
+        code = _build_chain(outline)
         chaincodes.append(code)
     df = pd.DataFrame(chaincodes)
     df["cdelt1"] = smap.meta["cdelt1"]
@@ -355,7 +348,7 @@ def mask_to_chaincode(mask: np.ndarray, smap: sunpy.map.Map) -> pd.DataFrame:
     df["cc_y_arcsec"] = 0.0
     for row_idx in range(df.shape[0]):
         x, y = df.loc[row_idx, "cc_x_pix"], df.loc[row_idx, "cc_y_pix"]
-        x, y = pixel_to_arcsec(x, y, smap)
+        x, y = _pixel_to_arcsec(x, y, smap)
         df.loc[row_idx, "cc_x_arcsec"] = x
         df.loc[row_idx, "cc_y_arcsec"] = y
     df["date_obs"] = smap.date.strftime("%Y-%m-%dT%H:%M:%S")  # isoformat
