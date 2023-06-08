@@ -1,0 +1,13 @@
+sunpy
+numpy
+dfp
+scipy
+astropy
+networkx
+pandas
+matplotlib
+requests
+bs4
+lxml
+zeep
+drms
